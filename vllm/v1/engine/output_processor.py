@@ -4,8 +4,9 @@
 import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Optional, Union, cast
+from typing import Any, Mapping, Optional, Union, cast
 import json
+import os
 
 import torch
 
@@ -289,6 +290,30 @@ class RequestState:
         return PoolingOutput(data=pooling_output)
 
 
+class SofaTraceInfo:
+    def __init__(self,
+                 sofa_trace_id: Optional[str] = None,
+                 sofa_rpc_id: Optional[str] = None,
+                 request_id: Optional[str] = None,
+                 aigw_app_key_id: Optional[str] = None):
+        self.sofa_trace_id = sofa_trace_id
+        self.sofa_rpc_id = sofa_rpc_id
+        self.request_id = request_id
+        self.aigw_app_key_id = aigw_app_key_id
+
+
+class EnvInfo:
+    def __init__(self,
+                 pod_ip: Optional[str] = None,
+                 idc: Optional[str] = None,
+                 model_service_id: Optional[str] = None,
+                 model_instance_id: Optional[str] = None):
+        self.pod_ip = pod_ip
+        self.idc = idc
+        self.model_service_id = model_service_id
+        self.model_instance_id = model_instance_id
+
+
 class OutputProcessor:
     """Process EngineCoreOutputs into RequestOutputs."""
 
@@ -522,6 +547,29 @@ class OutputProcessor:
             if req_state.n:
                 span.set_attribute(SpanAttributes.GEN_AI_REQUEST_N,
                                    req_state.n)
+                
+            # inject sofa trace info into span attrs
+            if engine_core_output.trace_headers:
+                sofa_trace_info = self._get_sofa_trace_info(engine_core_output.trace_headers)
+                if sofa_trace_id := sofa_trace_info.sofa_trace_id:
+                    span.set_attribute(SpanAttributes.SOFA_TRACE_ID, sofa_trace_id)
+                if sofa_rpc_id := sofa_trace_info.sofa_rpc_id:
+                    span.set_attribute(SpanAttributes.SOFA_RPC_ID, sofa_rpc_id)
+                if request_id := sofa_trace_info.request_id:
+                    span.set_attribute(SpanAttributes.REQUEST_ID, request_id)
+                if api_key_id := sofa_trace_info.aigw_app_key_id:
+                    span.set_attribute(SpanAttributes.API_KEY_ID, api_key_id)
+
+            # inject metadata from env
+            if env_info := self._get_env_info():
+                if pod_ip := env_info.pod_ip:
+                    span.set_attribute(SpanAttributes.POD_IP, pod_ip)
+                if idc := env_info.idc:
+                    span.set_attribute(SpanAttributes.IDC, idc)
+                if model_instance_id := env_info.model_instance_id:
+                    span.set_attribute(SpanAttributes.MODEL_INSTANCE_ID, model_instance_id)
+                if model_service_id := env_info.model_service_id:
+                    span.set_attribute(SpanAttributes.MODEL_SERVICE_ID, model_service_id)
 
             if req_state.logprobs_processor:
                 logprobs_processor = req_state.logprobs_processor
@@ -584,3 +632,34 @@ class OutputProcessor:
         ParentRequest.observe_finished_request(
             req_state.parent_req, iteration_stats,
             req_state.stats.num_generation_tokens)
+
+    def _get_sofa_trace_info(self, parent_trace_headers: Mapping[str, str]) -> Optional[SofaTraceInfo]:
+        """
+        Get SOFA trace id and RPC id from headers
+        """
+        sofa_trace_info = SofaTraceInfo()
+        for (k, v) in parent_trace_headers.items():
+            if k == "SOFA-TraceId":
+                sofa_trace_info.sofa_trace_id = v
+            if k == "SOFA-RpcId":
+                sofa_trace_info.sofa_rpc_id = v
+            if k == "X-Request-ID":
+                sofa_trace_info.request_id = v
+            if k == "X-AIGW-APP-KeyId":
+                sofa_trace_info.aigw_app_key_id = v
+        return sofa_trace_info
+
+    def _get_env_info(self) -> EnvInfo:
+        """
+        Extract metadata from environment
+        """
+        env_info = EnvInfo()
+        if ip := os.getenv("POD_IP"):
+            env_info.pod_ip = ip
+        if idc := os.getenv("ALIPAY_APP_IDC"):
+            env_info.idc = idc
+        if model_service_id := os.getenv("MODEL_SERVICE_ID"):
+            env_info.model_service_id = model_service_id
+        if model_instance_id := os.getenv("MODEL_INSTANCE_ID"):
+            env_info.model_instance_id = model_instance_id
+        return env_info

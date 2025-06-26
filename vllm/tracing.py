@@ -8,7 +8,7 @@ from typing import Optional
 from vllm.logger import init_logger
 from vllm.utils import run_once
 
-TRACE_HEADERS = ["traceparent", "tracestate"]
+TRACE_HEADERS = ["traceparent", "tracestate", "SOFA-TraceId", "SOFA-RpcId", "X-Request-ID", "X-AIGW-APP-KeyId"]
 
 logger = init_logger(__name__)
 
@@ -127,6 +127,15 @@ class SpanAttributes:
     GEN_AI_CANDIDATE_DECODED_TOKENS = "gen_ai_candidate_decoded_tokens"
     GEN_AI_CANDIDATE_TOKEN_IDS = "gen_ai_candidate_token_ids"
     GEN_AI_CANDIDATE_TOKENS_PROBS = "gen_ai_candidate_tokens_probs"
+
+    SOFA_TRACE_ID = "Parent-TraceId"
+    SOFA_RPC_ID = "Parent-RpcId"
+    REQUEST_ID = "alipay.aicloud.request_id"
+    API_KEY_ID = "alipay.aicloud.api_key_id"
+    POD_IP = "alipay.base.ip"
+    IDC = "alipay.base.idc"
+    MODEL_SERVICE_ID = "alipay.aicloud.model_service_id"
+    MODEL_INSTANCE_ID = "alipay.aicloud.model_instance_id"
 
 
 def contains_trace_headers(headers: Mapping[str, str]) -> bool:
