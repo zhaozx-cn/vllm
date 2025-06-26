@@ -70,6 +70,7 @@ class SamplerOutput:
     # PLACEHOLDER_TOKEN_ID (-1 by default) is used for padding.
     sampled_token_ids: torch.Tensor
     logprobs_tensors: Optional[LogprobsTensors]
+    logprobs_tensors_for_trace: Optional[LogprobsTensors]
 
 
 @dataclass
@@ -114,6 +115,8 @@ class ModelRunnerOutput:
     # req_id -> num_nans_in_logits
     num_nans_in_logits: Optional[dict[str, int]] = None
 
+    logprobs_tensors_for_trace: Optional[LogprobsLists] = None
+
 
 # ModelRunnerOutput wrapper for async scheduling.
 class AsyncModelRunnerOutput(ABC):
@@ -142,6 +145,7 @@ EMPTY_MODEL_RUNNER_OUTPUT = ModelRunnerOutput(req_ids=[],
                                               req_id_to_index={},
                                               sampled_token_ids=[],
                                               logprobs=None,
+                                              logprobs_tensors_for_trace=None,
                                               prompt_logprobs_dict={},
                                               pooler_output=[],
                                               num_nans_in_logits=None)

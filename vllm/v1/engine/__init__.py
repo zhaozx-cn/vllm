@@ -105,6 +105,7 @@ class EngineCoreOutput(
     new_token_ids: list[int]
 
     new_logprobs: Optional[LogprobsLists] = None
+    new_logprobs_for_trace: Optional[LogprobsLists] = None
     new_prompt_logprobs_tensors: Optional[LogprobsTensors] = None
 
     pooling_output: Optional[torch.Tensor] = None

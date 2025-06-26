@@ -372,6 +372,10 @@ class AsyncLLM(EngineClient):
                 tokenization_kwargs,
             )
 
+            # todo: 使用装饰器修改
+            sampling_params.logprobs_in_trace = self.observability_config.use_enhanced_tracing\
+                if self.observability_config else None
+
             q = await self.add_request(
                 request_id,
                 prompt,
@@ -672,6 +676,9 @@ class AsyncLLM(EngineClient):
     async def pin_lora(self, lora_id: int) -> bool:
         """Prevent an adapter from being evicted."""
         return await self.engine_core.pin_lora_async(lora_id)
+    
+    async def use_enhanced_tracing(self, logprob: int) -> None:
+        self.observability_config.use_enhanced_tracing = logprob
 
     async def collective_rpc(self,
                              method: str,

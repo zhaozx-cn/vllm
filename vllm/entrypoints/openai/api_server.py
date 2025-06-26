@@ -1260,6 +1260,20 @@ async def invocations(raw_request: Request):
     res = base(raw_request).create_error_response(message=msg)
     return JSONResponse(content=res.model_dump(), status_code=res.error.code)
 
+@router.post("/use_enhanced_tracing")
+async def use_enhanced_tracing(raw_request: Request):
+    try:
+        data = await raw_request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+    
+    if "logprob" not in data:
+        raise HTTPException(status_code=400, detail="Missing logprob in body")
+    
+    logprob = data["logprob"]
+    logger.info("Modify enhanced tracing logprobs: %s", logprob)
+    await engine_client(raw_request).use_enhanced_tracing(logprob)
+    return JSONResponse(content={"status": "success"}, status_code=200)
 
 if envs.VLLM_TORCH_PROFILER_DIR:
     logger.warning(

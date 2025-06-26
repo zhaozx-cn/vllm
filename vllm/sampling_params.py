@@ -164,6 +164,7 @@ class SamplingParams(
     follows the OpenAI API: The API will always return the log probability of
     the sampled token, so there may be up to `logprobs+1` elements in the
     response. When set to -1, return all `vocab_size` log probabilities."""
+    logprobs_in_trace: Optional[int] = None
     prompt_logprobs: Optional[int] = None
     """Number of log probabilities to return per prompt token.
     When set to -1, return all `vocab_size` log probabilities."""

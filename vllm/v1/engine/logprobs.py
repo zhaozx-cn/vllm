@@ -27,6 +27,9 @@ class LogprobsProcessor:
 
     # Logprobs for this request
     logprobs: Optional[SampleLogprobs]
+    candidate_token_ids:Optional[list[list[int]]]
+    candidate_decoded_tokens:Optional[list[list[str]]]
+    candidate_token_probs:Optional[list[list[float]]]
     prompt_logprobs: Optional[PromptLogprobs]
     cumulative_logprob: Optional[float]
     num_logprobs: Optional[int]
@@ -41,10 +44,14 @@ class LogprobsProcessor:
         assert request.sampling_params is not None
         num_logprobs = request.sampling_params.logprobs
         num_prompt_logprobs = request.sampling_params.prompt_logprobs
+        logprobs_in_trace = request.sampling_params.logprobs_in_trace
         return cls(
             tokenizer=tokenizer,
             cumulative_logprob=(None if num_logprobs is None else 0.),
             logprobs=(None if num_logprobs is None else []),
+            candidate_token_ids=(None if logprobs_in_trace is None else []),
+            candidate_decoded_tokens=(None if logprobs_in_trace is None else []),
+            candidate_token_probs=(None if logprobs_in_trace is None else []),
             # NOTE: logprob of first prompt token is None.
             prompt_logprobs=(None if num_prompt_logprobs is None else [None]),
             num_prompt_logprobs=num_prompt_logprobs,
@@ -88,6 +95,31 @@ class LogprobsProcessor:
                     rank,
                     self.num_logprobs,
                 ))
+
+    def _update_sample_logprobs_for_trace(self, logprobs_lists: LogprobsLists) -> None:
+        """Update with sample logprobs from EngineCore.
+
+        Outer lists are only of len > 1 if EngineCore made
+        >1 tokens in prior step (e.g. in spec decoding).
+
+        Args:
+          logprobs_lists: the lists of logprob tokens, logprobs, and ranks.
+
+        """
+        token_ids_lst, logprobs_lst, ranks_lst = logprobs_lists
+
+        for _, logprobs, token_ids in zip(ranks_lst, logprobs_lst,
+                                             token_ids_lst):
+
+            # Detokenize (non-incrementally).
+            decoded_tokens = NONES if self.tokenizer is None else (
+                convert_ids_list_to_tokens(self.tokenizer, token_ids, True))
+
+            # Update with the Logprob dictionary for this pos.
+            self.candidate_token_ids.append(token_ids)
+            self.candidate_decoded_tokens.append(decoded_tokens)
+            self.candidate_token_probs.append(logprobs)
+
 
     def _update_prompt_logprobs(
         self,
@@ -199,3 +231,5 @@ class LogprobsProcessor:
             self._update_sample_logprobs(output.new_logprobs)
         if output.new_prompt_logprobs_tensors is not None:
             self._update_prompt_logprobs(output.new_prompt_logprobs_tensors)
+        if output.new_logprobs_for_trace is not None:
+            self._update_sample_logprobs_for_trace(output.new_logprobs_for_trace)

@@ -224,6 +224,7 @@ class InputBatch:
         self.generators: dict[int, torch.Generator] = {}
 
         self.num_logprobs: dict[str, int] = {}
+        self.use_enhanced_tracing: dict[str, int] = {}
         # NOTE(rob): num_prompt_logprobs only includes reqs
         # that are currently in the prefill phase.
         self.num_prompt_logprobs: dict[str, int] = {}
@@ -369,6 +370,8 @@ class InputBatch:
                 self.num_logprobs[req_id] = (self.vocab_size
                                              if sampling_params.logprobs == -1
                                              else sampling_params.logprobs)
+            if sampling_params.logprobs_in_trace is not None:
+                self.use_enhanced_tracing[req_id] = sampling_params.logprobs_in_trace
             if sampling_params.prompt_logprobs is not None:
                 self.num_prompt_logprobs[req_id] = (
                     self.vocab_size if sampling_params.prompt_logprobs == -1
@@ -464,6 +467,7 @@ class InputBatch:
         self.repetition_penalties_reqs.discard(req_id)
         self.generators.pop(req_index, None)
         self.num_logprobs.pop(req_id, None)
+        self.use_enhanced_tracing.pop(req_id, None)
         self.num_prompt_logprobs.pop(req_id, None)
         self.in_progress_prompt_logprobs_cpu.pop(req_id, None)
 
@@ -716,6 +720,7 @@ class InputBatch:
             top_k=None if self.no_top_k else self.top_k[:num_reqs],
             generators=self.generators,
             max_num_logprobs=self.max_num_logprobs,
+            max_num_logprobs_in_trace=self.max_num_logprobs_in_trace,
             prompt_token_ids=prompt_token_ids,
             frequency_penalties=self.frequency_penalties[:num_reqs],
             presence_penalties=self.presence_penalties[:num_reqs],
@@ -811,6 +816,10 @@ class InputBatch:
     @property
     def max_num_logprobs(self) -> Optional[int]:
         return max(self.num_logprobs.values()) if self.num_logprobs else None
+    
+    @property
+    def max_num_logprobs_in_trace(self) -> Optional[int]:
+        return max(self.use_enhanced_tracing.values()) if self.use_enhanced_tracing else None
 
     @property
     def no_prompt_logprob(self) -> bool:

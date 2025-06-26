@@ -33,6 +33,9 @@ import types
 import uuid
 import warnings
 import weakref
+import io
+import zstandard as zstd
+import base64
 from argparse import (Action, ArgumentDefaultsHelpFormatter, ArgumentParser,
                       ArgumentTypeError, RawDescriptionHelpFormatter,
                       _ArgumentGroup)
@@ -3330,6 +3333,19 @@ def is_torch_equal_or_newer(target: str) -> bool:
     except Exception:
         # Fallback to PKG-INFO to load the package info, needed by the doc gen.
         return Version(importlib.metadata.version('torch')) >= Version(target)
+
+
+def compress_and_encode(input_string: str) -> str:
+    compressor = zstd.ZstdCompressor(level=6)
+    compressed_data = compressor.compress(input_string.encode('utf-8'))
+    return base64.b64encode(compressed_data).decode('utf-8')
+
+
+def decompress_and_decode(encoded_data: str) -> str:
+    compressed_data = base64.b64decode(encoded_data)
+    decompressor = zstd.ZstdDecompressor()
+    data = decompressor.decompress(compressed_data)
+    return data.decode('utf-8')
 
 
 # Helper function used in testing.

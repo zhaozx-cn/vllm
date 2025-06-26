@@ -39,5 +39,11 @@ class SamplingMetadata:
     # req_index -> bad_words_token_ids
     bad_words_token_ids: dict[int, list[list[int]]]
 
+    # not none when enhanced trace enabled
+    max_num_logprobs_in_trace: Optional[int] = None
+
     # Loaded logits processors
     logitsprocs: LogitsProcessors
+
+    # not none when enhanced trace enabled
+    max_num_logprobs_in_trace: Optional[int] = None

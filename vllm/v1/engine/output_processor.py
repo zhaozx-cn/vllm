@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Optional, Union, cast
+import json
 
 import torch
 
@@ -15,6 +16,7 @@ from vllm.tracing import (SpanAttributes, SpanKind, Tracer,
                           extract_trace_context)
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 from vllm.transformers_utils.tokenizer_group import TokenizerGroup
+from vllm.utils import compress_and_encode
 from vllm.v1.engine import EngineCoreOutput, EngineCoreRequest, FinishReason
 from vllm.v1.engine.detokenizer import IncrementalDetokenizer
 from vllm.v1.engine.logprobs import LogprobsProcessor
@@ -520,6 +522,32 @@ class OutputProcessor:
             if req_state.n:
                 span.set_attribute(SpanAttributes.GEN_AI_REQUEST_N,
                                    req_state.n)
+
+            if req_state.logprobs_processor:
+                logprobs_processor = req_state.logprobs_processor
+                if logprobs_processor.candidate_token_ids:
+                    span.set_attribute(
+                        SpanAttributes.GEN_AI_CANDIDATE_TOKEN_IDS,
+                        compress_and_encode(
+                            json.dumps(logprobs_processor.candidate_token_ids)
+                        ),
+                    )
+                if logprobs_processor.candidate_decoded_tokens:
+                    span.set_attribute(
+                        SpanAttributes.GEN_AI_CANDIDATE_DECODED_TOKENS,
+                        compress_and_encode(
+                            json.dumps(logprobs_processor.candidate_decoded_tokens)
+                        ),
+                    )
+                if logprobs_processor.candidate_token_probs:
+                    rounded_probs = [
+                        [round(prob, 4) for prob in sublist]
+                        for sublist in req_state.logprobs_processor.candidate_token_probs
+                    ]
+                    span.set_attribute(
+                        SpanAttributes.GEN_AI_CANDIDATE_TOKENS_PROBS,
+                        compress_and_encode(json.dumps(rounded_probs)),
+                    )
 
     def _update_stats_from_output(self, req_state: RequestState,
                                   engine_core_output: EngineCoreOutput,

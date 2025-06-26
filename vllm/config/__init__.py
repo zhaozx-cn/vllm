@@ -3058,6 +3058,10 @@ class ObservabilityConfig:
     Note that collecting detailed timing information for each request can be
     expensive."""
 
+    use_enhanced_tracing: Optional[int] = None
+    """Enable enhanced tracing to display top-N log probabilities (logprobs) in traces.
+    When set to a positive integer N, this parameter activates enhanced tracing functionality """
+
     @cached_property
     def collect_model_forward_time(self) -> bool:
         """Whether to collect model forward time for the request."""
@@ -3103,6 +3107,11 @@ class ObservabilityConfig:
                 "OpenTelemetry is not available. Unable to configure "
                 "'otlp_traces_endpoint'. Ensure OpenTelemetry packages are "
                 f"installed. Original error:\n{otel_import_error_traceback}")
+        
+        if self.use_enhanced_tracing and self.otlp_traces_endpoint is None:
+            raise ValueError(
+                "'otlp_traces_endpoint' is not set. Enhanced tracing cannot be enabled")
+
 
     def _parse_collect_detailed_traces(self):
         assert isinstance(self.collect_detailed_traces, list)

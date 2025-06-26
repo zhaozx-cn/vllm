@@ -421,6 +421,8 @@ class EngineArgs:
         ObservabilityConfig.show_hidden_metrics_for_version
     otlp_traces_endpoint: Optional[str] = \
         ObservabilityConfig.otlp_traces_endpoint
+    use_enhanced_tracing: Optional[int] = \
+        ObservabilityConfig.use_enhanced_tracing
     collect_detailed_traces: Optional[list[DetailedTraceModules]] = \
         ObservabilityConfig.collect_detailed_traces
     disable_async_output_proc: bool = not ModelConfig.use_async_output_proc
@@ -830,6 +832,9 @@ class EngineArgs:
         observability_group.add_argument(
             "--otlp-traces-endpoint",
             **observability_kwargs["otlp_traces_endpoint"])
+        observability_group.add_argument("--use-enhanced-tracing",
+            **observability_kwargs["use_enhanced_tracing"])
+        
         # TODO: generalise this special case
         choices = observability_kwargs["collect_detailed_traces"]["choices"]
         metavar = f"{{{','.join(choices)}}}"
@@ -1406,6 +1411,7 @@ class EngineArgs:
             show_hidden_metrics_for_version=(
                 self.show_hidden_metrics_for_version),
             otlp_traces_endpoint=self.otlp_traces_endpoint,
+            use_enhanced_tracing=self.use_enhanced_tracing,
             collect_detailed_traces=self.collect_detailed_traces,
         )
 

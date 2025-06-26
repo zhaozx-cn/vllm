@@ -77,7 +77,8 @@ class Sampler(nn.Module):
         # This is different from the V0 sampler, which uses the logits that
         # is used for sampling (after penalties and temperature scaling).
         num_logprobs = sampling_metadata.max_num_logprobs
-        if num_logprobs is not None:
+        use_enhanced_tracing = sampling_metadata.max_num_logprobs_in_trace
+        if num_logprobs is not None or use_enhanced_tracing:
             if self.logprobs_mode == LogprobsMode.RAW_LOGPROBS:
                 raw_logprobs = self.compute_logprobs(logits)
             elif self.logprobs_mode == LogprobsMode.RAW_LOGITS:
@@ -111,6 +112,9 @@ class Sampler(nn.Module):
         # Get logprobs and rank tensors (if requested)
         logprobs_tensors = None if num_logprobs is None else \
             self.gather_logprobs(raw_logprobs, num_logprobs, token_ids=sampled)
+        
+        logprobs_tensors_for_trace = None if not use_enhanced_tracing else \
+            self.gather_logprobs(raw_logprobs, use_enhanced_tracing, token_ids=sampled)
 
         # Use int32 to reduce the tensor size.
         sampled = sampled.to(torch.int32)
@@ -122,6 +126,7 @@ class Sampler(nn.Module):
             # token per request.
             sampled_token_ids=sampled.unsqueeze(-1),
             logprobs_tensors=logprobs_tensors,
+            logprobs_tensors_for_trace=logprobs_tensors_for_trace,
         )
         return sampler_output
 
