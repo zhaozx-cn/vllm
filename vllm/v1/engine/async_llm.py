@@ -274,6 +274,7 @@ class AsyncLLM(EngineClient):
         trace_headers: Optional[Mapping[str, str]] = None,
         priority: int = 0,
         data_parallel_rank: Optional[int] = None,
+        request_arrival_time: Optional[float] = None,
     ) -> RequestOutputCollector:
         """Add new request to the AsyncLLM."""
 
@@ -288,7 +289,7 @@ class AsyncLLM(EngineClient):
         # Convert Input --> Request.
         prompt_str, request = self.processor.process_inputs(
             request_id, prompt, params, arrival_time, lora_request,
-            tokenization_kwargs, trace_headers, priority, data_parallel_rank)
+            tokenization_kwargs, trace_headers, priority, data_parallel_rank, request_arrival_time)
 
         if is_pooling or params.n == 1:
             await self._add_request(request, prompt_str, None, 0, queue)
@@ -318,7 +319,15 @@ class AsyncLLM(EngineClient):
         await self.engine_core.add_request_async(request)
 
         if self.log_requests:
-            logger.info("Added request %s.", request.request_id)
+            trace_headers = request.trace_headers
+            logger.info("Added request %s traceId: [%s], rpcId: [%s], requestId: [%s],"
+                        " otlpTraceId: [%s], appKeyId: [%s].",
+                        request.request_id,
+                        trace_headers.get("SOFA-TraceId", None) if trace_headers else None,
+                        trace_headers.get("SOFA-RpcId", None) if trace_headers else None,
+                        trace_headers.get("X-Request-ID", None) if trace_headers else None,
+                        trace_headers.get("traceparent", None) if trace_headers else None,
+                        trace_headers.get("X-AIGW-APP-KeyId", None) if trace_headers else None)
 
     # TODO: we should support multiple prompts in one call, as you
     # can do with LLM.generate. So that for multi-prompt completion
@@ -361,6 +370,7 @@ class AsyncLLM(EngineClient):
             # We start the output_handler on the first call to generate() so
             # we can call __init__ before the event loop, which enables us
             # to handle startup failure gracefully in the OpenAI server.
+            request_arrival_time = time.time()
             self._run_output_handler()
 
             tokenization_kwargs: dict[str, Any] = {}
@@ -373,7 +383,7 @@ class AsyncLLM(EngineClient):
             )
 
             # todo: 使用装饰器修改
-            sampling_params.logprobs_in_trace = self.observability_config.use_enhanced_tracing\
+            sampling_params.logprobs_in_trace = self.observability_config.trace_logprobs\
                 if self.observability_config else None
 
             q = await self.add_request(
@@ -385,6 +395,7 @@ class AsyncLLM(EngineClient):
                 priority=priority,
                 tokenization_kwargs=tokenization_kwargs,
                 data_parallel_rank=data_parallel_rank,
+                request_arrival_time=request_arrival_time,
             )
 
             # The output_handler task pushes items into the queue.
@@ -677,8 +688,9 @@ class AsyncLLM(EngineClient):
         """Prevent an adapter from being evicted."""
         return await self.engine_core.pin_lora_async(lora_id)
     
-    async def use_enhanced_tracing(self, logprob: int) -> None:
-        self.observability_config.use_enhanced_tracing = logprob
+    async def trace_config(self, logprob: int) -> None:
+        if logprob is not None:
+            self.observability_config.trace_logprobs = logprob
 
     async def collective_rpc(self,
                              method: str,

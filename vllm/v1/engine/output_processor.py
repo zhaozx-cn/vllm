@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Union, cast
@@ -9,11 +10,13 @@ import json
 import os
 
 import torch
+from opentelemetry.trace import Status, StatusCode
 
 from vllm.outputs import (CompletionOutput, PoolingOutput,
                           PoolingRequestOutput, RequestOutput)
 from vllm.sampling_params import RequestOutputKind
-from vllm.tracing import (SpanAttributes, SpanKind, Tracer,
+from vllm.tracing import (APP_NAME, ENHANCED_TRACE_LEVEL, NORMAL_TRACE_LEVEL,
+                          SpanAttributes, SpanKind, Tracer, Status, StatusCode,
                           extract_trace_context)
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 from vllm.transformers_utils.tokenizer_group import TokenizerGroup
@@ -21,6 +24,7 @@ from vllm.utils import compress_and_encode
 from vllm.v1.engine import EngineCoreOutput, EngineCoreRequest, FinishReason
 from vllm.v1.engine.detokenizer import IncrementalDetokenizer
 from vllm.v1.engine.logprobs import LogprobsProcessor
+from vllm.v1.engine.observable_context import ObservableContext
 from vllm.v1.engine.parallel_sampling import ParentRequest
 from vllm.v1.metrics.stats import (IterationStats, LoRARequestStates,
                                    RequestStateStats)
@@ -92,14 +96,18 @@ class RequestState:
         prompt: Optional[str],
         prompt_token_ids: list[int],
         logprobs_processor: Optional[LogprobsProcessor],
+        observable_context: ObservableContext,
         detokenizer: Optional[IncrementalDetokenizer],
         max_tokens_param: Optional[int],
         arrival_time: float,
+        api_server_arrival_time: Optional[float],
+        process_input_finish_time: Optional[float],
         queue: Optional[RequestOutputCollector],
         log_stats: bool,
         top_p: Optional[float] = None,
         n: Optional[int] = None,
         temperature: Optional[float] = None,
+        request_params: Optional[dict[str, Any]] = None,
     ):
         self.request_id = request_id
         self.parent_req = parent_req
@@ -110,6 +118,7 @@ class RequestState:
         self.prompt_token_ids = prompt_token_ids
         self.prompt_len = len(prompt_token_ids)
         self.logprobs_processor = logprobs_processor
+        self.observable_context = observable_context
         self.detokenizer = detokenizer
         self.max_tokens_param = max_tokens_param
         self.top_p = top_p
@@ -118,9 +127,12 @@ class RequestState:
         self.is_prefilling = True
         self.queue = queue
         self.num_cached_tokens = 0
+        self.request_params = request_params
 
         self.stats = RequestStateStats(
-            arrival_time=arrival_time) if log_stats else None
+            arrival_time=arrival_time,
+            api_server_arrival_time=api_server_arrival_time,
+            process_input_finish_time=process_input_finish_time) if log_stats else None
 
     @classmethod
     def from_new_request(
@@ -133,6 +145,20 @@ class RequestState:
         queue: Optional[RequestOutputCollector],
         log_stats: bool,
     ) -> "RequestState":
+        def gen_request_params():
+            ret = {}
+            if sampling_params := request.sampling_params:
+                ret["top_p"] = sampling_params.top_p
+                ret["top_k"] = sampling_params.top_k
+                ret["temperature"] = sampling_params.temperature
+                ret["max_tokens"] = sampling_params.max_tokens
+                ret["frequency_penalty"] = sampling_params.frequency_penalty
+                ret["repetition_penalty"] = sampling_params.repetition_penalty
+                ret["presence_penalty"] = sampling_params.presence_penalty
+                ret["min_p"] = sampling_params.min_p
+                ret["min_tokens"] = sampling_params.min_tokens
+                ret["n"] = sampling_params.n
+            return ret
 
         if sampling_params := request.sampling_params:
             if not sampling_params.detokenize:
@@ -170,6 +196,9 @@ class RequestState:
             prompt=prompt,
             prompt_token_ids=request.prompt_token_ids,
             logprobs_processor=logprobs_processor,
+            observable_context=ObservableContext.from_new_request(
+                tokenizer=tokenizer,
+            ),
             detokenizer=detokenizer,
             max_tokens_param=max_tokens_param,
             top_p=top_p,
@@ -178,6 +207,9 @@ class RequestState:
             arrival_time=request.arrival_time,
             queue=queue,
             log_stats=log_stats,
+            api_server_arrival_time=request.api_server_arrival_time,
+            process_input_finish_time=request.process_input_finish_time,
+            request_params=gen_request_params(),
         )
 
     def make_request_output(
@@ -301,17 +333,15 @@ class SofaTraceInfo:
         self.request_id = request_id
         self.aigw_app_key_id = aigw_app_key_id
 
-
+@dataclass
 class EnvInfo:
-    def __init__(self,
-                 pod_ip: Optional[str] = None,
-                 idc: Optional[str] = None,
-                 model_service_id: Optional[str] = None,
-                 model_instance_id: Optional[str] = None):
-        self.pod_ip = pod_ip
-        self.idc = idc
-        self.model_service_id = model_service_id
-        self.model_instance_id = model_instance_id
+    pod_ip: Optional[str] = None
+    idc: Optional[str] = None
+    model_service_id: Optional[str] = None
+    model_instance_id: Optional[str] = None
+    pod_name: Optional[str] = None
+    hostname: Optional[str] = None
+    model_instance_name: Optional[str] = None
 
 
 class OutputProcessor:
@@ -420,6 +450,7 @@ class OutputProcessor:
         request_outputs: Union[list[RequestOutput],
                                list[PoolingRequestOutput]] = []
         reqs_to_abort: list[str] = []
+        output_processing_loop_start_time = time.time()
         for engine_core_output in engine_core_outputs:
             req_id = engine_core_output.request_id
             req_state = self.request_states.get(req_id)
@@ -455,6 +486,10 @@ class OutputProcessor:
                 req_state.logprobs_processor.update_from_output(
                     engine_core_output)
 
+            # Handle observable info, if enhanced trace is enabled.
+            if req_state.observable_context:
+                req_state.observable_context.update_from_output(engine_core_output)
+
             # 4) Create and handle RequestOutput objects.
             if request_output := req_state.make_request_output(
                     new_token_ids, pooling_output, finish_reason, stop_reason,
@@ -484,6 +519,9 @@ class OutputProcessor:
                 if self.tracer:
                     self.do_tracing(engine_core_output, req_state,
                                     iteration_stats)
+            else:
+                req_state.stats.output_token_queued_latency += output_processing_loop_start_time - iteration_stats.iteration_timestamp
+                req_state.stats.output_token_process_latency += time.time() - output_processing_loop_start_time
         self.lora_states.update_iteration_stats(iteration_stats)
 
         return OutputProcessorOutput(
@@ -512,45 +550,100 @@ class OutputProcessor:
             prefill_time = metrics.first_token_ts - metrics.scheduled_ts
             decode_time = metrics.last_token_ts - metrics.first_token_ts
             inference_time = metrics.last_token_ts - metrics.scheduled_ts
+            api_server_time = metrics.arrival_time - metrics.api_server_arrival_time
+            process_input_time = metrics.process_input_finish_time - metrics.arrival_time
             span.set_attribute(
                 SpanAttributes.GEN_AI_LATENCY_TIME_TO_FIRST_TOKEN,
-                metrics.first_token_latency)
+                metrics.first_token_latency,
+            )
             span.set_attribute(SpanAttributes.GEN_AI_LATENCY_E2E, e2e_time)
-            span.set_attribute(SpanAttributes.GEN_AI_LATENCY_TIME_IN_QUEUE,
-                               queued_time)
-            span.set_attribute(SpanAttributes.GEN_AI_USAGE_PROMPT_TOKENS,
-                               len(req_state.prompt_token_ids))
-            span.set_attribute(SpanAttributes.GEN_AI_USAGE_COMPLETION_TOKENS,
-                               metrics.num_generation_tokens)
+            span.set_attribute(SpanAttributes.GEN_AI_LATENCY_TIME_IN_QUEUE, queued_time)
             span.set_attribute(
-                SpanAttributes.GEN_AI_LATENCY_TIME_IN_MODEL_PREFILL,
-                prefill_time)
+                SpanAttributes.GEN_AI_USAGE_PROMPT_TOKENS,
+                len(req_state.prompt_token_ids),
+            )
             span.set_attribute(
-                SpanAttributes.GEN_AI_LATENCY_TIME_IN_MODEL_DECODE,
-                decode_time)
+                SpanAttributes.GEN_AI_USAGE_COMPLETION_TOKENS,
+                metrics.num_generation_tokens,
+            )
             span.set_attribute(
-                SpanAttributes.GEN_AI_LATENCY_TIME_IN_MODEL_INFERENCE,
-                inference_time)
+                SpanAttributes.GEN_AI_LATENCY_TIME_IN_MODEL_PREFILL, prefill_time
+            )
+            span.set_attribute(
+                SpanAttributes.GEN_AI_LATENCY_TIME_IN_MODEL_DECODE, decode_time
+            )
+            span.set_attribute(
+                SpanAttributes.GEN_AI_LATENCY_TIME_IN_MODEL_INFERENCE, inference_time
+            )
+            span.set_attribute(
+                SpanAttributes.ALIPAY_LATENCY_TIME_IN_API_SERVER, api_server_time
+            )
+            span.set_attribute(
+                SpanAttributes.ALIPAY_LATENCY_TIME_IN_INPUT_PROCESSING,
+                process_input_time,
+            )
+            span.set_attribute(
+                SpanAttributes.ALIPAY_LATENCY_TIME_IN_OUTPUT_QUEUE,
+                metrics.output_token_queued_latency,
+            )
+            span.set_attribute(
+                SpanAttributes.ALIPAY_LATENCY_TIME_IN_OUTPUT_PROCESSING,
+                metrics.output_token_process_latency,
+            )
+            span.set_attribute(
+                SpanAttributes.GEN_AI_RESPONSE_FINISH_REASON,
+                json.dumps([str(engine_core_output.finish_reason)]),
+            )
 
             # meta
-            span.set_attribute(SpanAttributes.GEN_AI_REQUEST_ID,
-                               req_state.request_id)
-            if req_state.top_p:
-                span.set_attribute(SpanAttributes.GEN_AI_REQUEST_TOP_P,
-                                   req_state.top_p)
-            if req_state.max_tokens_param:
-                span.set_attribute(SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS,
-                                   req_state.max_tokens_param)
-            if req_state.temperature:
-                span.set_attribute(SpanAttributes.GEN_AI_REQUEST_TEMPERATURE,
-                                   req_state.temperature)
-            if req_state.n:
-                span.set_attribute(SpanAttributes.GEN_AI_REQUEST_N,
-                                   req_state.n)
-                
+            span.set_attribute(SpanAttributes.GEN_AI_REQUEST_ID, req_state.request_id)
+            if req_state.request_params:
+                span.set_attribute(
+                    SpanAttributes.ALIPAY_REQUEST_PARAMS,
+                    json.dumps(req_state.request_params),
+                )
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_TOP_P,
+                    req_state.request_params.get("top_p"),
+                )
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_TOP_K,
+                    req_state.request_params.get("top_k"),
+                )
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS,
+                    req_state.request_params.get("max_tokens"),
+                )
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_TEMPERATURE,
+                    req_state.request_params.get("temperature"),
+                )
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_N, req_state.request_params.get("n")
+                )
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_MIN_P,
+                    req_state.request_params.get("min_p"),
+                )
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_FREQUENCY_PENALTY,
+                    req_state.request_params.get("frequency_penalty"),
+                )
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_REPETITION_PENALTY,
+                    req_state.request_params.get("repetition_penalty"),
+                )
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_PRESENCE_PENALTY,
+                    req_state.request_params.get("presence_penalty"),
+                )
+            span.set_attribute(SpanAttributes.APP_NAME, APP_NAME)
+
             # inject sofa trace info into span attrs
             if engine_core_output.trace_headers:
-                sofa_trace_info = self._get_sofa_trace_info(engine_core_output.trace_headers)
+                sofa_trace_info = self._get_sofa_trace_info(
+                    engine_core_output.trace_headers
+                )
                 if sofa_trace_id := sofa_trace_info.sofa_trace_id:
                     span.set_attribute(SpanAttributes.SOFA_TRACE_ID, sofa_trace_id)
                 if sofa_rpc_id := sofa_trace_info.sofa_rpc_id:
@@ -567,35 +660,90 @@ class OutputProcessor:
                 if idc := env_info.idc:
                     span.set_attribute(SpanAttributes.IDC, idc)
                 if model_instance_id := env_info.model_instance_id:
-                    span.set_attribute(SpanAttributes.MODEL_INSTANCE_ID, model_instance_id)
+                    span.set_attribute(
+                        SpanAttributes.MODEL_INSTANCE_ID, model_instance_id
+                    )
                 if model_service_id := env_info.model_service_id:
-                    span.set_attribute(SpanAttributes.MODEL_SERVICE_ID, model_service_id)
+                    span.set_attribute(
+                        SpanAttributes.MODEL_SERVICE_ID, model_service_id
+                    )
+                if model_instance_name := env_info.model_instance_name:
+                    span.set_attribute(
+                        SpanAttributes.MODEL_INSTANCE_NAME, model_instance_name
+                    )
+                if pod_name := env_info.pod_name:
+                    span.set_attribute(SpanAttributes.POD_NAME, pod_name)
+                if hostname := env_info.hostname:
+                    span.set_attribute(SpanAttributes.HOSTNAME, hostname)
 
-            if req_state.logprobs_processor:
-                logprobs_processor = req_state.logprobs_processor
-                if logprobs_processor.candidate_token_ids:
+            if req_state.observable_context and req_state.observable_context.not_empty:
+                ob_context = req_state.observable_context
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_TRACE_LEVEL, ENHANCED_TRACE_LEVEL
+                )
+                if ob_context.candidate_token_ids:
                     span.set_attribute(
-                        SpanAttributes.GEN_AI_CANDIDATE_TOKEN_IDS,
+                        SpanAttributes.GEN_AI_RESPONSE_PER_TOKEN_CANDIDATE_TOKEN_IDS,
+                        compress_and_encode(json.dumps(ob_context.candidate_token_ids)),
+                    )
+                if ob_context.candidate_decoded_tokens:
+                    span.set_attribute(
+                        SpanAttributes.GEN_AI_RESPONSE_PER_TOKEN_CANDIDATE_DECODED_TOKENS,
                         compress_and_encode(
-                            json.dumps(logprobs_processor.candidate_token_ids)
+                            json.dumps(ob_context.candidate_decoded_tokens)
                         ),
                     )
-                if logprobs_processor.candidate_decoded_tokens:
-                    span.set_attribute(
-                        SpanAttributes.GEN_AI_CANDIDATE_DECODED_TOKENS,
-                        compress_and_encode(
-                            json.dumps(logprobs_processor.candidate_decoded_tokens)
-                        ),
-                    )
-                if logprobs_processor.candidate_token_probs:
+                if ob_context.candidate_token_probs:
                     rounded_probs = [
                         [round(prob, 4) for prob in sublist]
-                        for sublist in req_state.logprobs_processor.candidate_token_probs
+                        for sublist in ob_context.candidate_token_probs
                     ]
                     span.set_attribute(
-                        SpanAttributes.GEN_AI_CANDIDATE_TOKENS_PROBS,
+                        SpanAttributes.GEN_AI_RESPONSE_PER_TOKEN_CANDIDATE_TOKENS_LOGPROBS,
                         compress_and_encode(json.dumps(rounded_probs)),
                     )
+                if ob_context.iter_batch_size:
+                    span.set_attribute(
+                        SpanAttributes.GEN_AI_ITERATION_PER_TOKEN_BATCH_SIZE,
+                        compress_and_encode(json.dumps(ob_context.iter_batch_size)),
+                    )
+                if ob_context.iter_total_tokens_count:
+                    span.set_attribute(
+                        SpanAttributes.GEN_AI_ITERATION_PER_TOKEN_TOTAL_TOKENS,
+                        compress_and_encode(
+                            json.dumps(ob_context.iter_total_tokens_count)
+                        ),
+                    )
+                if ob_context.token_time:
+                    span.set_attribute(
+                        SpanAttributes.GEN_AI_LATENCY_PER_TOKEN_GENERATION_TIME,
+                        compress_and_encode(
+                            json.dumps(
+                                [
+                                    round(x - req_state.stats.arrival_time, 4)
+                                    for x in ob_context.token_time
+                                ]
+                            )
+                        ),
+                    )
+                if ob_context.scheduled_time:
+                    span.set_attribute(
+                        SpanAttributes.GEN_AI_LATENCY_PER_TOKEN_SCHEDULED_TIME,
+                        compress_and_encode(
+                            json.dumps(
+                                [
+                                    round(x - req_state.stats.arrival_time, 4)
+                                    for x in ob_context.scheduled_time
+                                ]
+                            )
+                        ),
+                    )
+            else:
+                span.set_attribute(
+                    SpanAttributes.GEN_AI_REQUEST_TRACE_LEVEL, NORMAL_TRACE_LEVEL
+                )
+
+            span.set_status(Status(StatusCode.OK))
 
     def _update_stats_from_output(self, req_state: RequestState,
                                   engine_core_output: EngineCoreOutput,
@@ -660,6 +808,12 @@ class OutputProcessor:
             env_info.idc = idc
         if model_service_id := os.getenv("MODEL_SERVICE_ID"):
             env_info.model_service_id = model_service_id
-        if model_instance_id := os.getenv("MODEL_INSTANCE_ID"):
+        if model_instance_id := os.getenv("MODEL_INSTANCE_NAME"):
             env_info.model_instance_id = model_instance_id
+        if pod_name := os.getenv("ALIPAY_POD_NAME"):
+            env_info.pod_name = pod_name
+        if hostname := os.getenv("HOSTNAME"):
+            env_info.hostname = hostname
+        if model_instance_name := os.getenv("MODEL_INSTANCE_NAME"):
+            env_info.model_instance_name = model_instance_name
         return env_info

@@ -322,6 +322,7 @@ class Processor:
         trace_headers: Optional[Mapping[str, str]] = None,
         priority: int = 0,
         data_parallel_rank: Optional[int] = None,
+        api_server_arrival_time: Optional[float] = None,
     ) -> tuple[Optional[str], EngineCoreRequest]:
 
         # TODO(woosuk): Support pooling models.
@@ -421,6 +422,8 @@ class Processor:
                         identifier=decoder_mm_hashes[modality][idx],
                         mm_position=decoder_mm_positions[modality][idx]))
 
+        process_input_finish_time = time.time()
+
         return decoder_inputs.get("prompt"), EngineCoreRequest(
             request_id=request_id,
             prompt_token_ids=decoder_inputs["prompt_token_ids"],
@@ -434,6 +437,8 @@ class Processor:
             priority=priority,
             data_parallel_rank=data_parallel_rank,
             trace_headers=trace_headers,
+            api_server_arrival_time=api_server_arrival_time,
+            process_input_finish_time=process_input_finish_time,
         )
 
     def _validate_model_inputs(self,

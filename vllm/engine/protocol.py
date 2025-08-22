@@ -335,7 +335,7 @@ class EngineClient(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    async def use_enhanced_tracing(self, logprob: int) -> None:
+    async def trace_config(self, logprob: int) -> None:
         """Use to show logprobs in trace"""
         ...
 

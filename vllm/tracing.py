@@ -10,6 +10,11 @@ from vllm.utils import run_once
 
 TRACE_HEADERS = ["traceparent", "tracestate", "SOFA-TraceId", "SOFA-RpcId", "X-Request-ID", "X-AIGW-APP-KeyId"]
 
+APP_NAME = 'vllm'
+
+NORMAL_TRACE_LEVEL = 1
+ENHANCED_TRACE_LEVEL = 2
+
 logger = init_logger(__name__)
 
 _is_otel_imported = False
@@ -18,7 +23,8 @@ try:
     from opentelemetry.context.context import Context
     from opentelemetry.sdk.environment_variables import (
         OTEL_EXPORTER_OTLP_TRACES_PROTOCOL)
-    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider, Status, StatusCode
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
     from opentelemetry.trace import SpanKind, Tracer, set_tracer_provider
     from opentelemetry.trace.propagation.tracecontext import (
@@ -44,6 +50,12 @@ except ImportError:
     class Tracer:  # type: ignore
         pass
 
+    class Status:  # type: ignore
+        pass
+
+    class StatusCode:  # type: ignore
+        pass
+
 
 def is_otel_available() -> bool:
     return _is_otel_imported
@@ -56,13 +68,15 @@ def init_tracer(instrumenting_module_name: str,
             "OpenTelemetry is not available. Unable to initialize "
             "a tracer. Ensure OpenTelemetry packages are installed. "
             f"Original error:\n{otel_import_error_traceback}")
-    trace_provider = TracerProvider()
+    resource = Resource.create({"service.name": "vllm"})
+    trace_provider = TracerProvider(resource=resource)
+    set_tracer_provider(trace_provider)
 
     span_exporter = get_span_exporter(otlp_traces_endpoint)
     trace_provider.add_span_processor(BatchSpanProcessor(span_exporter))
-    set_tracer_provider(trace_provider)
 
     tracer = trace_provider.get_tracer(instrumenting_module_name)
+
     return tracer
 
 
@@ -104,9 +118,15 @@ class SpanAttributes:
     GEN_AI_REQUEST_TOP_P = "gen_ai.request.top_p"
     GEN_AI_REQUEST_TEMPERATURE = "gen_ai.request.temperature"
     GEN_AI_RESPONSE_MODEL = "gen_ai.response.model"
+    GEN_AI_REQUEST_TOP_K = "gen_ai.request.top_k"
+    GEN_AI_REQUEST_MIN_P = "gen_ai.request.min_p"
+    GEN_AI_REQUEST_REPETITION_PENALTY = "gen_ai.request.repetition_penalty"
+    GEN_AI_REQUEST_FREQUENCY_PENALTY = "gen_ai.request.frequency_penalty"
+    GEN_AI_REQUEST_PRESENCE_PENALTY = "gen_ai.request.presence_penalty"
     # Attribute names added until they are added to the semantic conventions:
     GEN_AI_REQUEST_ID = "gen_ai.request.id"
     GEN_AI_REQUEST_N = "gen_ai.request.n"
+    GEN_AI_RESPONSE_FINISH_REASON = "gen_ai.response.finish_reasons"
     GEN_AI_USAGE_NUM_SEQUENCES = "gen_ai.usage.num_sequences"
     GEN_AI_LATENCY_TIME_IN_QUEUE = "gen_ai.latency.time_in_queue"
     GEN_AI_LATENCY_TIME_TO_FIRST_TOKEN = "gen_ai.latency.time_to_first_token"
@@ -124,18 +144,34 @@ class SpanAttributes:
     GEN_AI_LATENCY_TIME_IN_MODEL_DECODE = "gen_ai.latency.time_in_model_decode"
     GEN_AI_LATENCY_TIME_IN_MODEL_INFERENCE = \
         "gen_ai.latency.time_in_model_inference"
-    GEN_AI_CANDIDATE_DECODED_TOKENS = "gen_ai_candidate_decoded_tokens"
-    GEN_AI_CANDIDATE_TOKEN_IDS = "gen_ai_candidate_token_ids"
-    GEN_AI_CANDIDATE_TOKENS_PROBS = "gen_ai_candidate_tokens_probs"
+    GEN_AI_REQUEST_TRACE_LEVEL = "gen_ai.request.trace_level"
+    
+    # trace_level_2
+    GEN_AI_LATENCY_PER_TOKEN_GENERATION_TIME = "gen_ai.latency.per_token_generation_time"
+    GEN_AI_LATENCY_PER_TOKEN_SCHEDULED_TIME = "gen_ai.latency.per_token_scheduled_time"
+    GEN_AI_ITERATION_PER_TOKEN_BATCH_SIZE = "gen_ai.iteration.per_token_batch_size"
+    GEN_AI_ITERATION_PER_TOKEN_TOTAL_TOKENS = "gen_ai.iteration.per_token_total_tokens"
+    GEN_AI_RESPONSE_PER_TOKEN_CANDIDATE_DECODED_TOKENS = "gen_ai.response.per_token_candidate_decoded_tokens"
+    GEN_AI_RESPONSE_PER_TOKEN_CANDIDATE_TOKEN_IDS = "gen_ai.response.per_token_candidate_token_ids"
+    GEN_AI_RESPONSE_PER_TOKEN_CANDIDATE_TOKENS_LOGPROBS = "gen_ai.response.per_token_candidate_tokens_logprobs"
 
     SOFA_TRACE_ID = "Parent-TraceId"
     SOFA_RPC_ID = "Parent-RpcId"
     REQUEST_ID = "alipay.aicloud.request_id"
     API_KEY_ID = "alipay.aicloud.api_key_id"
     POD_IP = "alipay.base.ip"
+    POD_NAME = "alipay.base.pod_name"
+    HOSTNAME = "alipay.base.host"
     IDC = "alipay.base.idc"
     MODEL_SERVICE_ID = "alipay.aicloud.model_service_id"
     MODEL_INSTANCE_ID = "alipay.aicloud.model_instance_id"
+    MODEL_INSTANCE_NAME = "alipay.aicloud.model_instance_name"
+    APP_NAME = "alipay.aicloud.app_name"
+    ALIPAY_LATENCY_TIME_IN_API_SERVER = "alipay.aicloud.time_in_api_server"
+    ALIPAY_LATENCY_TIME_IN_INPUT_PROCESSING = "alipay.aicloud.time_in_input_processing"
+    ALIPAY_LATENCY_TIME_IN_OUTPUT_QUEUE = "alipay.aicloud.time_in_output_queue"
+    ALIPAY_LATENCY_TIME_IN_OUTPUT_PROCESSING = "alipay.aicloud.time_in_output_processing"
+    ALIPAY_REQUEST_PARAMS = "alipay.aicloud.request_params"
 
 
 def contains_trace_headers(headers: Mapping[str, str]) -> bool:

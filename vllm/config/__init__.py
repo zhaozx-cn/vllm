@@ -3058,7 +3058,10 @@ class ObservabilityConfig:
     Note that collecting detailed timing information for each request can be
     expensive."""
 
-    use_enhanced_tracing: Optional[int] = None
+    token_level_profiling: bool = False
+    """Enable token-level profiling to collect detailed timing information for each token to trace."""
+
+    trace_logprobs: Optional[int] = None
     """Enable enhanced tracing to display top-N log probabilities (logprobs) in traces.
     When set to a positive integer N, this parameter activates enhanced tracing functionality """
 
@@ -3108,9 +3111,12 @@ class ObservabilityConfig:
                 "'otlp_traces_endpoint'. Ensure OpenTelemetry packages are "
                 f"installed. Original error:\n{otel_import_error_traceback}")
         
-        if self.use_enhanced_tracing and self.otlp_traces_endpoint is None:
+        if (self.trace_logprobs or self.token_level_profiling) and self.otlp_traces_endpoint is None:
             raise ValueError(
-                "'otlp_traces_endpoint' is not set. Enhanced tracing cannot be enabled")
+                "'otlp_traces_endpoint' is not set. Enhanced tracing and token-level profiling cannot be enabled")
+
+        if self.trace_logprobs:
+            self.token_level_profiling = True
 
 
     def _parse_collect_detailed_traces(self):
