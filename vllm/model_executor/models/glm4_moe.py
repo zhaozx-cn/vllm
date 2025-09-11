@@ -196,7 +196,7 @@ class Glm4MoE(nn.Module):
             final_hidden_states = (
                 self.experts.maybe_all_reduce_tensor_model_parallel(
                     final_hidden_states))
-        return final_hidden_states.view(num_tokens, hidden_dim)
+        return final_hidden_states.view(-1, hidden_dim)
 
 
 class Glm4MoeAttention(nn.Module):
