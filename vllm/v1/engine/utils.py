@@ -5,6 +5,7 @@ import contextlib
 import os
 import weakref
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum, auto
 from multiprocessing import Process, connection
@@ -124,13 +125,26 @@ class CoreEngineProcManager:
 
         self._finalizer = weakref.finalize(self, shutdown, self.processes)
 
+        def start_proc(proc: BaseProcess, data_parallel: bool,
+                       local_dp_rank: int):
+            with set_device_control_env_var(vllm_config, local_dp_rank) if (
+                    data_parallel) else contextlib.nullcontext():
+                proc.start()
+
         data_parallel = vllm_config.parallel_config.data_parallel_size > 1
         try:
-            for proc, local_dp_rank in zip(self.processes, local_dp_ranks):
-                with set_device_control_env_var(
-                        vllm_config, local_dp_rank) if (
-                            data_parallel) else contextlib.nullcontext():
-                    proc.start()
+            # Start all processes in parallel and collect any exceptions.
+            with ThreadPoolExecutor(
+                    max_workers=len(self.processes)) as executor:
+                futures = []
+                for proc, local_dp_rank in zip(self.processes, local_dp_ranks):
+                    f = executor.submit(start_proc, proc, data_parallel,
+                                        local_dp_rank)
+                    futures.append(f)
+                for future in futures:
+                    exc = future.exception()
+                    if exc is not None:
+                        raise exc
         finally:
             # Kill other procs if not all are running.
             if self.finished_procs():
