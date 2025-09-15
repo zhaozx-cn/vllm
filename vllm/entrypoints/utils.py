@@ -14,6 +14,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask, BackgroundTasks
 
+from vllm.config import VllmConfig
 from vllm.engine.arg_utils import EngineArgs
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
@@ -286,14 +287,20 @@ def show_filtered_argument_or_group_from_help(parser: argparse.ArgumentParser,
             sys.exit(1)
 
 
-def get_max_tokens(max_model_len: int, request: Union[ChatCompletionRequest,
-                                                      CompletionRequest],
-                   input_length: int, default_sampling_params: dict) -> int:
+def get_max_tokens(max_model_len: int,
+                   request: Union[ChatCompletionRequest, CompletionRequest],
+                   input_length: int,
+                   default_sampling_params: dict,
+                   vllm_config: Optional[VllmConfig] = None) -> int:
 
     max_tokens = getattr(request, "max_completion_tokens",
                          None) or request.max_tokens
     default_max_tokens = max_model_len - input_length
     max_output_tokens = current_platform.get_max_output_tokens(input_length)
+
+    if vllm_config and vllm_config.kv_transfer_config and \
+        not vllm_config.kv_transfer_config.is_kv_consumer:
+        max_tokens = 1
 
     return min(val
                for val in (default_max_tokens, max_tokens, max_output_tokens,

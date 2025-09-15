@@ -11,7 +11,7 @@ import jinja2
 from fastapi import Request
 from typing_extensions import assert_never
 
-from vllm.config import ModelConfig
+from vllm.config import ModelConfig, VllmConfig
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.logger import RequestLogger
 # yapf conflicts with isort for this block
@@ -83,6 +83,7 @@ class OpenAIServingCompletion(OpenAIServing):
         self,
         request: CompletionRequest,
         raw_request: Optional[Request] = None,
+        vllm_config: Optional[VllmConfig] = None,
     ) -> Union[AsyncGenerator[str, None], CompletionResponse, ErrorResponse]:
         """Completion API similar to OpenAI's API.
 
@@ -179,6 +180,7 @@ class OpenAIServingCompletion(OpenAIServing):
                     request=request,
                     input_length=input_length,
                     default_sampling_params=self.default_sampling_params,
+                    vllm_config=vllm_config,
                 )
 
                 if request.use_beam_search:

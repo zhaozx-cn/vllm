@@ -692,7 +692,9 @@ async def create_chat_completion(request: ChatCompletionRequest,
         return base(raw_request).create_error_response(
             message="The model does not support Chat Completions API")
     try:
-        generator = await handler.create_chat_completion(request, raw_request)
+        vllm_config = await engine_client(raw_request).get_vllm_config()
+        generator = await handler.create_chat_completion(
+            request, raw_request, vllm_config)
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value,
                             detail=str(e)) from e
@@ -733,7 +735,9 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
             message="The model does not support Completions API")
 
     try:
-        generator = await handler.create_completion(request, raw_request)
+        vllm_config = await engine_client(raw_request).get_vllm_config()
+        generator = await handler.create_completion(request, raw_request,
+                                                    vllm_config)
     except OverflowError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST.value,
                             detail=str(e)) from e

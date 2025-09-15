@@ -15,7 +15,7 @@ from fastapi import Request
 from openai_harmony import Message as OpenAIMessage
 from pydantic import TypeAdapter
 
-from vllm.config import ModelConfig
+from vllm.config import ModelConfig, VllmConfig
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.chat_utils import (ChatTemplateContentFormatOption,
                                          ConversationMessage,
@@ -162,6 +162,7 @@ class OpenAIServingChat(OpenAIServing):
         self,
         request: ChatCompletionRequest,
         raw_request: Optional[Request] = None,
+        vllm_config: Optional[VllmConfig] = None,
     ) -> Union[AsyncGenerator[str, None], ChatCompletionResponse,
                ErrorResponse]:
         """
@@ -271,7 +272,8 @@ class OpenAIServingChat(OpenAIServing):
                     max_model_len=self.max_model_len,
                     request=request,
                     input_length=len(engine_prompt["prompt_token_ids"]),
-                    default_sampling_params=self.default_sampling_params)
+                    default_sampling_params=self.default_sampling_params,
+                    vllm_config=vllm_config)
 
                 if request.use_beam_search:
                     sampling_params = request.to_beam_search_params(
