@@ -41,3 +41,6 @@ class SamplingMetadata:
 
     # Loaded logits processors
     logitsprocs: LogitsProcessors
+
+    # not none when enhanced trace enabled
+    max_num_logprobs_in_trace: Optional[int] = None

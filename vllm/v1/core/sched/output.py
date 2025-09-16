@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import time
 from typing import TYPE_CHECKING, Optional
 
 from vllm import bc_linter_include
@@ -160,3 +161,6 @@ class SchedulerOutput:
 
     # KV Cache Connector metadata.
     kv_connector_metadata: Optional[KVConnectorMetadata] = None
+
+    # Record the scheduling time point
+    scheduled_at: float = field(default_factory=time.time)

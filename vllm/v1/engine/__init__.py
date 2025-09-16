@@ -14,7 +14,7 @@ from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams
 from vllm.v1.metrics.stats import SchedulerStats
-from vllm.v1.outputs import LogprobsLists, LogprobsTensors
+from vllm.v1.outputs import LogprobsLists, LogprobsTensors, IterStats
 
 # These are possible values of RequestOutput.finish_reason,
 # so form part of the external API.
@@ -68,6 +68,8 @@ class EngineCoreRequest(
     priority: int = 0
 
     trace_headers: Optional[Mapping[str, str]] = None
+    api_server_arrival_time: Optional[float] = None
+    process_input_finish_time: Optional[float] = None
 
 
 class EngineCoreEventType(enum.IntEnum):
@@ -117,6 +119,8 @@ class EngineCoreOutput(
     trace_headers: Optional[Mapping[str, str]] = None
     # The number of tokens with prefix cache hits.
     num_cached_tokens: int = 0
+
+    iter_stats: Optional[IterStats] = None
 
     @property
     def finished(self) -> bool:

@@ -1911,6 +1911,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         logprobs_tensors = sampler_output.logprobs_tensors
         logprobs_lists = logprobs_tensors.tolists() \
             if logprobs_tensors is not None else None
+        
+        # NOTE: GPU -> CPU Sync happens here.
+        logprobs_tensors_for_trace = sampler_output.logprobs_tensors_for_trace.tolists() \
+            if sampler_output.logprobs_tensors_for_trace is not None else None
 
         # Compute prompt logprobs if needed.
         prompt_logprobs_dict = self._get_prompt_logprobs_dict(
@@ -1989,6 +1993,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         return (
             num_nans_in_logits,
             logprobs_lists,
+            logprobs_tensors_for_trace,
             valid_sampled_token_ids,
             prompt_logprobs_dict,
             req_ids_output_copy,
@@ -2121,6 +2126,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             (
                 num_nans_in_logits,
                 logprobs_lists,
+                logprobs_tensors_for_trace,
                 valid_sampled_token_ids,
                 prompt_logprobs_dict,
                 req_ids_output_copy,
@@ -2152,6 +2158,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             req_id_to_index=req_id_to_index_output_copy,
             sampled_token_ids=valid_sampled_token_ids,
             logprobs=logprobs_lists,
+            logprobs_tensors_for_trace=logprobs_tensors_for_trace,
             prompt_logprobs_dict=prompt_logprobs_dict,
             pooler_output=[],
             kv_connector_output=kv_connector_output,
@@ -2860,6 +2867,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             top_k=dummy_tensors(logits.size(1) - 1),
             generators={},
             max_num_logprobs=None,
+            max_num_logprobs_in_trace=None,
             no_penalties=True,
             prompt_token_ids=None,
             frequency_penalties=dummy_tensors(0.1),

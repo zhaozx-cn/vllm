@@ -89,6 +89,9 @@ class LogprobsProcessor:
                     self.num_logprobs,
                 ))
 
+
+
+
     def _update_prompt_logprobs(
         self,
         prompt_logprobs_tensors: LogprobsTensors,

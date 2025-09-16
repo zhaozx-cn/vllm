@@ -1267,6 +1267,18 @@ async def invocations(raw_request: Request):
     return JSONResponse(content=res.model_dump(), status_code=res.error.code)
 
 
+@router.post("/trace_config")
+async def trace_config(raw_request: Request):
+    try:
+        data = await raw_request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+    
+    logprob = data.get("logprob", None)
+    logger.info("Modify trace logprobs: %s", logprob)
+    await engine_client(raw_request).trace_config(logprob)
+    return JSONResponse(content={"status": "success"}, status_code=200)
+
 if envs.VLLM_TORCH_PROFILER_DIR:
     logger.warning(
         "Torch Profiler is enabled in the API server. This should ONLY be "

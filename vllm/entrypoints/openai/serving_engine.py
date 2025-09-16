@@ -928,6 +928,7 @@ class OpenAIServing:
         params: Optional[Union[SamplingParams, PoolingParams,
                                BeamSearchParams]],
         lora_request: Optional[LoRARequest],
+        trace_headers: Optional[dict[str, str]] = None,
     ) -> None:
         if self.request_logger is None:
             return
@@ -947,6 +948,7 @@ class OpenAIServing:
             prompt_embeds,
             params=params,
             lora_request=lora_request,
+            trace_headers=trace_headers,
         )
 
     async def _get_trace_headers(

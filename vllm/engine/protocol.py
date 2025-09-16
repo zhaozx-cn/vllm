@@ -333,6 +333,11 @@ class EngineClient(ABC):
                                drain_timeout: int = 300) -> None:
         """Scale the engine"""
         raise NotImplementedError
+    
+    @abstractmethod
+    async def trace_config(self, logprob: int) -> None:
+        """Use to show logprobs in trace"""
+        ...
 
     async def collective_rpc(self,
                              method: str,
