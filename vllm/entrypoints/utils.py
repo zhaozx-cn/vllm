@@ -8,9 +8,10 @@ import functools
 import os
 import subprocess
 import sys
+from http import HTTPStatus
 from typing import Any, Optional, Union
 
-from fastapi import Request
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask, BackgroundTasks
 
@@ -21,7 +22,7 @@ from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               CompletionRequest)
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
-from vllm.utils import FlexibleArgumentParser
+from vllm.utils import (FlexibleArgumentParser, random_uuid)
 
 logger = init_logger(__name__)
 
@@ -148,6 +149,55 @@ def load_aware_call(func):
 
     return wrapper
 
+
+async def log_request_exit(request: Request, response: Response):
+    try:
+        request_id = request.state.request_metadata.request_id
+    except AttributeError:
+        dummy_request_id = f"dummy-{random_uuid()}"
+        req_json = await request.json()
+        logger.error(f"No request_id found, using {dummy_request_id} instead: {req_json}")
+
+    status_code = response.status_code
+    if status_code == HTTPStatus.OK.value:
+        logger.info(f"Completed request {request_id}")
+    else:
+        logger.error(f"Failed to handle request {request_id} (status_code: {status_code})")
+
+def track_request_exit(func):
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        raw_request = kwargs.get("raw_request",
+                                 args[1] if len(args) > 1 else None)
+
+        assert raw_request is not None
+
+        try:
+            response = await func(*args, **kwargs)
+        except Exception:
+            raise
+
+        if isinstance(response, (JSONResponse, StreamingResponse)):
+            if response.background is None:
+                response.background = BackgroundTask(log_request_exit,
+                                                     raw_request, response)
+            elif isinstance(response.background, BackgroundTasks):
+                response.background.add_task(log_request_exit,
+                                             raw_request, response)
+            elif isinstance(response.background, BackgroundTask):
+                # Convert the single BackgroundTask to BackgroundTasks
+                # and chain the log_request_exit task to it
+                tasks = BackgroundTasks()
+                tasks.add_task(response.background.func,
+                               *response.background.args,
+                               **response.background.kwargs)
+                tasks.add_task(log_request_exit, raw_request, response)
+                response.background = tasks
+
+        return response
+
+    return wrapper
 
 def cli_env_setup():
     # The safest multiprocessing method is `spawn`, as the default `fork` method

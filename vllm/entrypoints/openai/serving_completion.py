@@ -94,6 +94,15 @@ class OpenAIServingCompletion(OpenAIServing):
             - suffix (the language models we currently support do not support
             suffix)
         """
+        request_id = (
+            f"cmpl-"
+            f"{self._base_request_id(raw_request, request.request_id)}")
+        created_time = int(time.time())
+
+        request_metadata = RequestResponseMetadata(request_id=request_id)
+        if raw_request:
+            raw_request.state.request_metadata = request_metadata
+
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             return error_check_ret
@@ -113,14 +122,7 @@ class OpenAIServingCompletion(OpenAIServing):
             return self.create_error_response(
                 "Echo is unsupported with prompt embeds.")
 
-        request_id = (
-            f"cmpl-"
-            f"{self._base_request_id(raw_request, request.request_id)}")
         created_time = int(time.time())
-
-        request_metadata = RequestResponseMetadata(request_id=request_id)
-        if raw_request:
-            raw_request.state.request_metadata = request_metadata
 
         try:
             lora_request = self._maybe_get_adapters(request)

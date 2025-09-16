@@ -98,7 +98,8 @@ from vllm.entrypoints.openai.tool_parsers import ToolParserManager
 from vllm.entrypoints.tool_server import (DemoToolServer, MCPToolServer,
                                           ToolServer)
 from vllm.entrypoints.utils import (cli_env_setup, load_aware_call,
-                                    log_non_default_args, with_cancellation)
+                                    log_non_default_args, track_request_exit,
+                                    with_cancellation)
 from vllm.logger import init_logger
 from vllm.reasoning import ReasoningParserManager
 from vllm.transformers_utils.config import (
@@ -685,6 +686,7 @@ async def cancel_responses(response_id: str, raw_request: Request):
              })
 @with_cancellation
 @load_aware_call
+@track_request_exit
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
     handler = chat(raw_request)
@@ -728,6 +730,7 @@ async def create_chat_completion(request: ChatCompletionRequest,
              })
 @with_cancellation
 @load_aware_call
+@track_request_exit
 async def create_completion(request: CompletionRequest, raw_request: Request):
     handler = completion(raw_request)
     if handler is None:
