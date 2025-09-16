@@ -838,6 +838,18 @@ class OpenAIServing:
                 prompt_token_ids=request_prompt,
             )
 
+        prompt_token_ids = prompt_inputs["prompt_token_ids"]
+        kv_transfer_params = request.kv_transfer_params
+        if kv_transfer_params is not None and \
+            kv_transfer_params.get("do_remote_prefill", False):
+            last_token_id = kv_transfer_params.get("last_token_id", None)
+            if last_token_id is None:
+                raise ValueError(
+                    "In disaggregated prefill mode, "
+                    "kv_transfer_params must contain the 'last_token_id' key, "
+                    f"but received: {kv_transfer_params}")
+            prompt_token_ids += [last_token_id]
+
         engine_prompt = EngineTokensPrompt(
             prompt_token_ids=prompt_inputs["prompt_token_ids"])
         if mm_data is not None:
