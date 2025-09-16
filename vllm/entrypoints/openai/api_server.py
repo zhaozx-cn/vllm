@@ -577,6 +577,10 @@ async def show_version():
     ver = {"version": VLLM_VERSION}
     return JSONResponse(content=ver)
 
+@router.get("/server_info")
+async def show_server_info(raw_request: Request):
+    server_info = {"vllm_config": str(raw_request.app.state.vllm_config)}
+    return JSONResponse(content=server_info)
 
 @router.post("/v1/responses",
              dependencies=[Depends(validate_json_request)],
@@ -1057,11 +1061,6 @@ async def do_rerank_v2(request: RerankRequest, raw_request: Request):
 if envs.VLLM_SERVER_DEV_MODE:
     logger.warning("SECURITY WARNING: Development endpoints are enabled! "
                    "This should NOT be used in production!")
-
-    @router.get("/server_info")
-    async def show_server_info(raw_request: Request):
-        server_info = {"vllm_config": str(raw_request.app.state.vllm_config)}
-        return JSONResponse(content=server_info)
 
     @router.post("/reset_prefix_cache")
     async def reset_prefix_cache(raw_request: Request):
