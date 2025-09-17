@@ -65,9 +65,11 @@ class LogprobsTensors(NamedTuple):
 class IterStats:
     logprobs_tensors_for_trace: Optional[LogprobsLists] = None
     iter_batch_size: int = 0
+    iter_waiting_size: int = 0
     iter_total_tokens_count: int = 0
     token_scheduled_time: float = 0.0
     token_output_time: float = 0.0
+    num_cached_tokens: int = 0
 
 
 @dataclass

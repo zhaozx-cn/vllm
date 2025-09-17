@@ -51,7 +51,11 @@ class ObservableContext:
         self.scheduled_time.extend([iter_stats.token_scheduled_time] * new_tokens_num)
         self.token_time.extend([iter_stats.token_output_time] * new_tokens_num)
         self.iter_batch_size.extend([iter_stats.iter_batch_size] * new_tokens_num)
+        self.iter_waiting_size.extend([iter_stats.iter_waiting_size] * new_tokens_num)
+        if self.num_cached_tokens is None:
+            self.num_cached_tokens = iter_stats.num_cached_tokens
 
+        
         if iter_stats.logprobs_tensors_for_trace:
             token_ids_lst, logprobs_lst, ranks_lst = iter_stats.logprobs_tensors_for_trace
             for _, logprobs, token_ids in zip(ranks_lst, logprobs_lst, token_ids_lst):

@@ -21,7 +21,7 @@ from vllm.tracing import (APP_NAME, ENHANCED_TRACE_LEVEL, NORMAL_TRACE_LEVEL,
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 from vllm.transformers_utils.tokenizer_group import TokenizerGroup
 from vllm.utils import compress_and_encode
-from vllm.v1.engine import EngineCoreOutput, EngineCoreRequest, FinishReason
+from vllm.v1.engine import EngineCoreOutput, EngineCoreRequest, FinishReason, get_event_name
 from vllm.v1.engine.detokenizer import IncrementalDetokenizer
 from vllm.v1.engine.logprobs import LogprobsProcessor
 from vllm.v1.engine.observable_context import ObservableContext
@@ -536,13 +536,20 @@ class OutputProcessor:
         assert iteration_stats is not None
         assert self.tracer is not None
 
-        arrival_time_nano_seconds = int(req_state.stats.arrival_time * 1e9)
+        span_start_time = (
+            req_state.stats.api_server_arrival_time
+            if req_state.stats.api_server_arrival_time
+            else req_state.stats.arrival_time
+        )
+
         trace_context = extract_trace_context(engine_core_output.trace_headers)
+        offset = time.time() - time.monotonic()
+
         with (self.tracer.start_as_current_span(
                 "llm_request",
                 kind=SpanKind.SERVER,
                 context=trace_context,
-                start_time=arrival_time_nano_seconds) as span):
+                start_time=int(span_start_time * 1e9)) as span):
             metrics = req_state.stats
             e2e_time = iteration_stats.iteration_timestamp - \
                        metrics.arrival_time
@@ -707,6 +714,11 @@ class OutputProcessor:
                         SpanAttributes.GEN_AI_ITERATION_PER_TOKEN_BATCH_SIZE,
                         compress_and_encode(json.dumps(ob_context.iter_batch_size)),
                     )
+                if ob_context.iter_waiting_size:
+                    span.set_attribute(
+                        SpanAttributes.GEN_AI_ITERATION_PER_TOKEN_WAITING_SIZE,
+                        compress_and_encode(json.dumps(ob_context.iter_waiting_size)),
+                    )
                 if ob_context.iter_total_tokens_count:
                     span.set_attribute(
                         SpanAttributes.GEN_AI_ITERATION_PER_TOKEN_TOTAL_TOKENS,
@@ -738,11 +750,14 @@ class OutputProcessor:
                             )
                         ),
                     )
+                if ob_context.num_cached_tokens is not None:
+                    span.set_attribute(SpanAttributes.GEN_AI_ITERATION_PER_TOKEN_CACHED_TOKENS, ob_context.num_cached_tokens)
+                for event in ob_context.events:
+                    span.add_event(name=get_event_name(event.type), timestamp = int((event.timestamp + offset)* 1e9))
             else:
                 span.set_attribute(
                     SpanAttributes.GEN_AI_REQUEST_TRACE_LEVEL, NORMAL_TRACE_LEVEL
                 )
-
             span.set_status(Status(StatusCode.OK))
 
     def _update_stats_from_output(self, req_state: RequestState,

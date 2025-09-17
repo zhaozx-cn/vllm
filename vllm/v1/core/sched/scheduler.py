@@ -888,6 +888,7 @@ class Scheduler(SchedulerInterface):
         iter_batch_size, iter_total_tokens_count, token_output_time = 0, 0, 0.0
         if self.vllm_config.observability_config.token_level_profiling:
             iter_batch_size = len(self.running)
+            iter_waiting_size = len(self.waiting)
             iter_total_tokens_count = sum(r.num_tokens for r in self.running)
             token_output_time = time.time()
 
@@ -968,9 +969,11 @@ class Scheduler(SchedulerInterface):
                         if logprobs_tensors_for_trace else None
                     ),
                     iter_total_tokens_count=iter_total_tokens_count,
+                    iter_waiting_size=iter_waiting_size,
                     iter_batch_size=iter_batch_size,
                     token_scheduled_time=scheduler_output.scheduled_at,
                     token_output_time=token_output_time,
+                    num_cached_tokens=request.num_cached_tokens,
                 )
                 if self.vllm_config.observability_config.token_level_profiling else None
             )
@@ -1316,7 +1319,12 @@ class Scheduler(SchedulerInterface):
         # KV Connector:: update recv and send status from last step.
         for req_id in (kv_connector_output.finished_recving or ()):
             logger.debug("Finished recving KV transfer for request %s", req_id)
+            if self.log_stats and self.requests.get(req_id):
+                self.requests.get(req_id).record_event(EngineCoreEventType.KV_CACHE_TRANSFER_RECVING_FINSHED)
             self.finished_recving_kv_req_ids.add(req_id)
+
         for req_id in (kv_connector_output.finished_sending or ()):
             logger.debug("Finished sending KV transfer for request %s", req_id)
+            if self.log_stats:
+                self.requests[req_id].record_event(EngineCoreEventType.KV_CACHE_TRANSFER_SENDING_FINISHED)
             self._free_blocks(self.requests[req_id])

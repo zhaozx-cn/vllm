@@ -4,7 +4,7 @@
 import enum
 import time
 from collections.abc import Mapping
-from typing import Any, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import msgspec
 import torch
@@ -77,6 +77,19 @@ class EngineCoreEventType(enum.IntEnum):
     QUEUED = 1
     SCHEDULED = 2
     PREEMPTED = 3
+    KV_CACHE_TRANSFER_SENDING_FINISHED = 4
+    KV_CACHE_TRANSFER_RECVING_FINSHED = 5
+
+EventMap: Dict[EngineCoreEventType, str] = {
+    EngineCoreEventType.QUEUED: "queued",
+    EngineCoreEventType.SCHEDULED: "scheduled",
+    EngineCoreEventType.PREEMPTED: "preempted",
+    EngineCoreEventType.KV_CACHE_TRANSFER_SENDING_FINISHED: "kv_cache_transfer_sending_finished",
+    EngineCoreEventType.KV_CACHE_TRANSFER_RECVING_FINSHED: "kv_cache_transfer_recving_finished",
+}
+
+def get_event_name(event_type: EngineCoreEventType) -> str:
+    return EventMap.get(event_type, f"unknown_event_{event_type}")
 
 
 class EngineCoreEvent(msgspec.Struct):

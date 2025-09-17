@@ -343,6 +343,7 @@ class AsyncLLM(EngineClient):
         trace_headers: Optional[Mapping[str, str]] = None,
         priority: int = 0,
         data_parallel_rank: Optional[int] = None,
+        metrics: Optional[Mapping[str, object]] = None,
     ) -> AsyncGenerator[RequestOutput, None]:
         """
         Main function called by the API server to kick off a request
@@ -370,7 +371,8 @@ class AsyncLLM(EngineClient):
             # We start the output_handler on the first call to generate() so
             # we can call __init__ before the event loop, which enables us
             # to handle startup failure gracefully in the OpenAI server.
-            request_arrival_time = time.time()
+            request_arrival_time = metrics.get('arrival_time', time.time()) if metrics else time.time()
+
             self._run_output_handler()
 
             tokenization_kwargs: dict[str, Any] = {}

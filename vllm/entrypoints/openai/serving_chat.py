@@ -180,6 +180,8 @@ class OpenAIServingChat(OpenAIServing):
         if raw_request:
             raw_request.state.request_metadata = request_metadata
 
+        arrival_time = time.time()
+
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             logger.error("Error with model %s", error_check_ret)
@@ -308,6 +310,8 @@ class OpenAIServingChat(OpenAIServing):
                         lora_request=lora_request,
                         trace_headers=trace_headers,
                         priority=request.priority,
+                        # TODO: add metrics
+                        metrics={"arrival_time": arrival_time}
                     )
 
                 generators.append(generator)

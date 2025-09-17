@@ -97,7 +97,9 @@ class OpenAIServingCompletion(OpenAIServing):
         request_id = (
             f"cmpl-"
             f"{self._base_request_id(raw_request, request.request_id)}")
-        created_time = int(time.time())
+
+        arrival_time = time.time()
+        created_time = int(arrival_time)
 
         request_metadata = RequestResponseMetadata(request_id=request_id)
         if raw_request:
@@ -121,8 +123,6 @@ class OpenAIServingCompletion(OpenAIServing):
         if request.echo and request.prompt_embeds is not None:
             return self.create_error_response(
                 "Echo is unsupported with prompt embeds.")
-
-        created_time = int(time.time())
 
         try:
             lora_request = self._maybe_get_adapters(request)
@@ -245,6 +245,8 @@ class OpenAIServingCompletion(OpenAIServing):
                         lora_request=lora_request,
                         trace_headers=trace_headers,
                         priority=request.priority,
+                        # TODO: add metrics
+                        metrics={"arrival_time": arrival_time}
                     )
 
                 generators.append(generator)
