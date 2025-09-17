@@ -1162,7 +1162,19 @@ class Scheduler(SchedulerInterface):
                 # Invalid request ID.
                 continue
 
+            if request.is_finished():
+                # If the request is already finished, only FINISHED_ABORTED is
+                # allowed, which is used to force resource cleanup.
+                assert finished_status == RequestStatus.FINISHED_ABORTED, (
+                    "Only FINISHED_ABORTED is allowed for requests that are "
+                    "already finished."
+                )
+                logger.info("Aborting request %s, freeing blocks.", req_id)
+                self._free_blocks(request)
+                continue
+            
             valid_requests.append(request)
+
             if request.status == RequestStatus.RUNNING:
                 running_requests_to_remove.add(request)
             else:
@@ -1182,7 +1194,13 @@ class Scheduler(SchedulerInterface):
     def _free_request(self, request: Request) -> Optional[dict[str, Any]]:
         assert request.is_finished()
 
-        delay_free_blocks, kv_xfer_params = self._connector_finished(request)
+        if request.status != RequestStatus.FINISHED_ABORTED:
+            delay_free_blocks, kv_xfer_params = \
+                self._connector_finished(request)
+        else:
+            delay_free_blocks = False
+            kv_xfer_params = None
+
         self.encoder_cache_manager.free(request)
         request_id = request.request_id
         self.finished_req_ids.add(request_id)
@@ -1325,6 +1343,10 @@ class Scheduler(SchedulerInterface):
 
         for req_id in (kv_connector_output.finished_sending or ()):
             logger.debug("Finished sending KV transfer for request %s", req_id)
-            if self.log_stats:
-                self.requests[req_id].record_event(EngineCoreEventType.KV_CACHE_TRANSFER_SENDING_FINISHED)
-            self._free_blocks(self.requests[req_id])
+            # NOTE: If the request was aborted, its blocks were already freed
+            # during the abort process, so the request may no longer exist in
+            # `self.requests`.
+            if req_id in self.requests:
+                if self.log_stats:
+                    self.requests[req_id].record_event(EngineCoreEventType.KV_CACHE_TRANSFER_SENDING_FINISHED)
+                self._free_blocks(self.requests[req_id])
