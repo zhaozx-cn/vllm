@@ -176,6 +176,7 @@ if TYPE_CHECKING:
     VLLM_CUSTOM_SCOPES_FOR_PROFILING: bool = False
     VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
     VLLM_DP_POLLING_LOAD_BALANCE_ENABLE: bool = False
+    VLLM_ASCEND_ENABLE_OMNIINFER_SAMPLER: bool = False
 
 
 def get_default_cache_root():
@@ -1246,6 +1247,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Enable dp load balance with polling 
     "VLLM_DP_POLLING_LOAD_BALANCE_ENABLE":
     lambda: bool(int(os.getenv("VLLM_DP_POLLING_LOAD_BALANCE_ENABLE", "0"))),
+
+    "VLLM_ASCEND_ENABLE_OMNIINFER_SAMPLER":
+    lambda: bool(int(os.getenv("VLLM_ASCEND_ENABLE_OMNIINFER_SAMPLER", "0"))),
 }
 
 # --8<-- [end:env-vars-definition]

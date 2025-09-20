@@ -9,6 +9,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any, Optional, Union
 
+from vllm import envs
 from vllm.config import VllmConfig
 from vllm.distributed.kv_events import EventPublisherFactory, KVEventBatch
 from vllm.distributed.kv_transfer.kv_connector.factory import (
@@ -32,6 +33,7 @@ from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.metrics.stats import SchedulerStats
 from vllm.v1.outputs import DraftTokenIds, KVConnectorOutput, ModelRunnerOutput, IterStats
 from vllm.v1.request import Request, RequestStatus
+from vllm.v1.sample.rejection_sampler import PLACEHOLDER_TOKEN_ID
 from vllm.v1.spec_decode.metrics import SpecDecodingStats
 from vllm.v1.structured_output import StructuredOutputManager
 
@@ -173,6 +175,11 @@ class Scheduler(SchedulerInterface):
             dcp_world_size=self.dcp_world_size,
         )
         self.use_pp = self.parallel_config.pipeline_parallel_size > 1
+        self.is_deepseek_mtp_kv_consumer_with_omniinfer_sampler = self.vllm_config.speculative_config is not None and \
+                                        self.vllm_config.speculative_config.method == 'deepseek_mtp' and \
+                                        self.vllm_config.kv_transfer_config is not None \
+                                        and self.vllm_config.kv_transfer_config.is_kv_consumer and \
+                                        envs.VLLM_ASCEND_ENABLE_OMNIINFER_SAMPLER
 
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
@@ -418,7 +425,11 @@ class Scheduler(SchedulerInterface):
                     # We use `request.num_tokens` instead of
                     # `request.num_prompt_tokens` to consider the resumed
                     # requests, which have output tokens.
-                    num_new_tokens = request.num_tokens - num_computed_tokens
+                    if self.is_deepseek_mtp_kv_consumer_with_omniinfer_sampler:
+                        num_new_tokens = (request.num_tokens_with_spec -
+                                          num_computed_tokens)
+                    else:
+                        num_new_tokens = request.num_tokens - num_computed_tokens
                     if (0 < self.scheduler_config.long_prefill_token_threshold
                             < num_new_tokens):
                         num_new_tokens = (
@@ -507,6 +518,16 @@ class Scheduler(SchedulerInterface):
                     continue
 
                 req_index += 1
+                # Speculative decode related.
+                if self.is_deepseek_mtp_kv_consumer_with_omniinfer_sampler and request.spec_token_ids:
+                    num_scheduled_spec_tokens = (num_new_tokens +
+                                                 request.num_computed_tokens -
+                                                 request.num_tokens)
+                    if num_scheduled_spec_tokens > 0:
+                        # Trim spec_token_ids list to num_scheduled_spec_tokens.
+                        del request.spec_token_ids[num_scheduled_spec_tokens:]
+                        scheduled_spec_decode_tokens[request.request_id] = (
+                            request.spec_token_ids)
                 self.running.append(request)
                 if self.log_stats:
                     request.record_event(EngineCoreEventType.SCHEDULED,
@@ -1130,6 +1151,13 @@ class Scheduler(SchedulerInterface):
         return len(self.running), len(self.waiting)
 
     def add_request(self, request: Request) -> None:
+        if self.is_deepseek_mtp_kv_consumer_with_omniinfer_sampler:
+            # fill spec_token_ids with PLACEHOLDER_TOKEN_ID to adapt omniinfer rejection sampler
+            num_speculative_tokens = self.vllm_config.speculative_config.num_speculative_tokens
+            if num_speculative_tokens is None:
+                num_speculative_tokens = 1
+            request.spec_token_ids = [PLACEHOLDER_TOKEN_ID
+                                      ] * num_speculative_tokens
         self.waiting.add_request(request)
         self.requests[request.request_id] = request
         if self.log_stats:
