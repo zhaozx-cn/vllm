@@ -164,3 +164,7 @@ class SchedulerOutput:
 
     # Record the scheduling time point
     scheduled_at: float = field(default_factory=time.time)
+    # Blocks to swap in. List of CPU -> GPU block number.
+    blocks_to_swap_in: list[tuple[int, int]] = None
+    # Blocks to swap out. List of GPU -> CPU block number.
+    blocks_to_swap_out: list[tuple[int, int]] = None

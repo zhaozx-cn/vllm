@@ -834,6 +834,8 @@ def _get_kv_cache_config_uniform_type(vllm_config: VllmConfig,
     page_size = get_uniform_page_size(kv_cache_spec)
     num_blocks = get_num_blocks(vllm_config, len(kv_cache_spec),
                                 available_memory, page_size)
+    num_cpu_blocks = int(vllm_config.cache_config.swap_space_bytes //
+                         page_size // len(kv_cache_spec))
 
     per_layer_size = page_size * num_blocks
     # All layers have the same KV cache spec, so we create one kv cache group
@@ -848,6 +850,7 @@ def _get_kv_cache_config_uniform_type(vllm_config: VllmConfig,
 
     kv_cache_config = KVCacheConfig(
         num_blocks=num_blocks,
+        num_cpu_blocks=num_cpu_blocks,
         kv_cache_tensors=kv_cache_tensors,
         kv_cache_groups=create_kv_cache_group_specs(kv_cache_spec,
                                                     grouped_layer_names),
@@ -1003,6 +1006,8 @@ def _get_kv_cache_config_uniform_page_size(
     page_size = get_uniform_page_size(kv_cache_spec)
     num_blocks = get_num_blocks(vllm_config, group_size, available_memory,
                                 page_size)
+    num_cpu_blocks = int(vllm_config.cache_config.swap_space_bytes //
+                         page_size // len(kv_cache_spec))
     per_memory_pool_size = page_size * num_blocks
     kv_cache_tensors = []
     for i in range(group_size):
@@ -1015,6 +1020,7 @@ def _get_kv_cache_config_uniform_page_size(
 
     kv_cache_config = KVCacheConfig(
         num_blocks=num_blocks,
+        num_cpu_blocks=num_cpu_blocks,
         kv_cache_tensors=kv_cache_tensors,
         kv_cache_groups=kv_cache_groups,
     )

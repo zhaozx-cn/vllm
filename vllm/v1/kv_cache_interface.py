@@ -273,3 +273,5 @@ class KVCacheConfig:
     see `_get_kv_cache_config_uniform_page_size` for more details.
     """
     kv_cache_groups: list[KVCacheGroupSpec]
+    """The number of KV cache blocks"""
+    num_cpu_blocks: int = 1
