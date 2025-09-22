@@ -101,13 +101,19 @@ class EngineCoreEvent(msgspec.Struct):
     """
     type: EngineCoreEventType
     timestamp: float
+    wall_clock_timestamp: float
 
     @classmethod
     def new_event(cls,
                   event_type: EngineCoreEventType,
                   timestamp: Optional[float] = None) -> "EngineCoreEvent":
+        wall_clock_timestamp = (
+            time.time()
+            if timestamp is None
+            else (time.time() - time.monotonic() + timestamp)
+        )
         timestamp = time.monotonic() if timestamp is None else timestamp
-        return cls(event_type, timestamp)
+        return cls(event_type, timestamp, wall_clock_timestamp)
 
 
 class EngineCoreOutput(

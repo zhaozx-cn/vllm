@@ -548,7 +548,6 @@ class OutputProcessor:
         )
 
         trace_context = extract_trace_context(engine_core_output.trace_headers)
-        offset = time.time() - time.monotonic()
 
         with (self.tracer.start_as_current_span(
                 "llm_request",
@@ -758,7 +757,10 @@ class OutputProcessor:
                 if ob_context.num_cached_tokens is not None:
                     span.set_attribute(SpanAttributes.GEN_AI_ITERATION_PER_TOKEN_CACHED_TOKENS, ob_context.num_cached_tokens)
                 for event in ob_context.events:
-                    span.add_event(name=get_event_name(event.type), timestamp = int((event.timestamp + offset)* 1e9))
+                    span.add_event(
+                        name=get_event_name(event.type),
+                        timestamp=int(event.wall_clock_timestamp * 1e9),
+                    )
             else:
                 span.set_attribute(
                     SpanAttributes.GEN_AI_REQUEST_TRACE_LEVEL, NORMAL_TRACE_LEVEL
