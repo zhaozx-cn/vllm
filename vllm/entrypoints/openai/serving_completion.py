@@ -94,12 +94,14 @@ class OpenAIServingCompletion(OpenAIServing):
             - suffix (the language models we currently support do not support
             suffix)
         """
+        arrival_time = time.time()
+        created_time = int(arrival_time)
+
         request_id = (
             f"cmpl-"
             f"{self._base_request_id(raw_request, request.request_id)}")
 
-        arrival_time = time.time()
-        created_time = int(arrival_time)
+        logger.info("Arrived request %s", request_id)
 
         request_metadata = RequestResponseMetadata(request_id=request_id)
         if raw_request:

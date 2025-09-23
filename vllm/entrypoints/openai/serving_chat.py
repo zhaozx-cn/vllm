@@ -173,14 +173,16 @@ class OpenAIServingChat(OpenAIServing):
         for the API specification. This API mimics the OpenAI
         Chat Completion API.
         """
+        arrival_time = time.time()
+
         request_id = "chatcmpl-" \
                      f"{self._base_request_id(raw_request, request.request_id)}"
+
+        logger.info("Arrived request %s", request_id)
 
         request_metadata = RequestResponseMetadata(request_id=request_id)
         if raw_request:
             raw_request.state.request_metadata = request_metadata
-
-        arrival_time = time.time()
 
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
