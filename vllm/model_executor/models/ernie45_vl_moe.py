@@ -433,7 +433,7 @@ class Ernie4_5_VLMoeDecoderLayer(nn.Module):
                                      **kwargs)
         else:
             hidden_states = self.mlp(hidden_states)
-
+        print("************slef.layer_idx ",self.layer_idx,flush=True)
         return hidden_states, residual
 
 
@@ -540,6 +540,9 @@ class Ernie4_5_VLMoeForCausalLM(nn.Module, SupportsPP):
         "gate_up_proj": [
             "gate_proj",
             "up_proj",
+        ],
+        "experts":[
+            "experts.0.gate_proj","experts.0.up_proj","experts.0.down_proj"
         ],
     }
 
