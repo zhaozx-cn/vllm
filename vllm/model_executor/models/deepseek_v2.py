@@ -1284,6 +1284,7 @@ class DeepseekV2Model(nn.Module):
         self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(
             ["hidden_states", "residual"], config.hidden_size
         )
+        self.aux_hidden_state_layers: tuple[int, ...] = ()
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -1487,6 +1488,13 @@ class DeepseekV2ForCausalLM(
             num_experts=self.config.n_routed_experts,
             num_redundant_experts=0,
         )
+    
+    def set_aux_hidden_state_layers(self, layers: tuple[int]) -> None:
+        self.model.aux_hidden_state_layers = layers
+    
+    def get_eagle3_aux_hidden_state_layers(self) -> tuple[int, int, int]:
+        num_layers = len(self.model.layers)
+        return 2, num_layers // 2, num_layers - 3
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         rocm_aiter_moe_shared_expert_enabled = (
